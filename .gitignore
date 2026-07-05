@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Generated outputs (reproducible from the scripts)
+target_distribution.png
+inverse_design.png
+designed_profile.csv
