@@ -1,0 +1,66 @@
+LED END-FACE COMPARISON — RUN RECORD
+============================================================
+timestamp: 20260712_165902
+
+LOCKED CONFIGURATION
+------------------------------------------------------------
+  rod material / index      : PMMA, n = 1.49
+  rod radius                : 3.0 mm  (diameter 6.0 mm)
+  rod length L              : 50.0 mm
+  target distance (apex)    : 80.0 mm
+  source                    : OSLON Pure 1414, Lambertian (I ~ cos theta)
+  LED coupling              : DIRECT to PMMA, no air gap (LED_DIRECT_COUPLE=True)
+  LED viewing angle         : 120.0 deg (full)
+  LED emitter               : radially-symmetric disk, diameter 1.4 mm, centered
+  internal angle range      : full hemisphere, up to 90 deg inside PMMA
+  success metric            : uniformity over 15.0 mm-RADIUS disc
+  screen shown out to       : 30.0 mm radius
+
+IMPLEMENTATION
+------------------------------------------------------------
+  rays per face             : 40000
+  RNG seed                  : 1
+  max bounces               : 80
+  tracer engine             : vectorized (Snell + unpolarized Fresnel + TIR)
+  efficiency denominator    : total emitted rays
+  uniformity                : std/mean of radial irradiance over 0..15.0 mm
+
+END FACES
+------------------------------------------------------------
+  1. flat: flat end face, f(r)=0
+  2. sphere_Rs5mm: convex sphere Rs=5 mm (apex 1.000 mm)
+  3. designed_flattop_15mm: inverse-designed 15 mm flat-top (collimated assumption; apex -0.453 mm)
+
+RESULTS  (uniformity = primary merit, lower is flatter)
+------------------------------------------------------------
+  face                       within15%   unif15   RMS mm   r95 mm
+  flat                            1.57   0.3366   355.75   444.36
+  sphere_Rs5mm                    2.55   0.5368   362.05   415.93
+  designed_flattop_15mm           2.14    0.539  1753.31   414.76
+
+PER-FACE DETAIL
+------------------------------------------------------------
+  flat:
+       descr                      = flat end face, f(r)=0
+       on_target_pct              = 85.53
+       within15_pct_of_emitted    = 1.57
+       uniformity_std_over_mean   = 0.3366
+       rms_r_mm                   = 355.75
+       r95_mm                     = 444.36
+       apex_f0_mm                 = 0.0
+  sphere_Rs5mm:
+       descr                      = convex sphere Rs=5 mm (apex 1.000 mm)
+       on_target_pct              = 84.69
+       within15_pct_of_emitted    = 2.55
+       uniformity_std_over_mean   = 0.5368
+       rms_r_mm                   = 362.05
+       r95_mm                     = 415.93
+       apex_f0_mm                 = 1.0
+  designed_flattop_15mm:
+       descr                      = inverse-designed 15 mm flat-top (collimated assumption; apex -0.453 mm)
+       on_target_pct              = 85.75
+       within15_pct_of_emitted    = 2.14
+       uniformity_std_over_mean   = 0.539
+       rms_r_mm                   = 1753.31
+       r95_mm                     = 414.76
+       apex_f0_mm                 = -0.4528

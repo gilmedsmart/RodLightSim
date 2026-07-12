@@ -42,7 +42,7 @@ from rod_lens_tracer import Params, simulate, radial_profile, interact
 # --------------------------------------------------------------------------- #
 # 1. TARGET irradiance you want on the plane.  Edit E_target(rho).
 # --------------------------------------------------------------------------- #
-RHO_MAX = 6.0   # outer radius of the desired pattern on the target [mm]
+RHO_MAX = 15.0   # outer radius of the desired pattern on the target [mm]
 
 def E_target(rho):
     """Desired irradiance vs radius (un-normalized). Examples below."""
@@ -177,7 +177,8 @@ def main():
     print(f"  apex bulge f(0) = {f_vals[0]:.3f} mm, edge f(R) = {f_vals[-1]:.3f} mm")
 
     print("Verifying with the forward Monte-Carlo tracer...")
-    hits, frac = simulate(f, fprime, p, n_rays=120000, seed=1)
+    hits, frac = simulate(f, fprime, p, n_rays=40000, seed=1,
+                          progress=True, desc="verify")
     print(f"  rays on target: {frac*100:.1f} %")
 
     # ---- plots ----
