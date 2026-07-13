@@ -39,6 +39,9 @@ class Params:
     WALL_MIRROR: bool = False       # True = reflective coating on the rod side wall
                              #  (specular reflect, never transmits out the side)
     WALL_REFLECTIVITY: float = 0.99  # [WALL_MIRROR] reflect prob/hit; rest absorbed
+    WALL_TAPER: bool = False        # True = conical wall: radius goes R_ENTRANCE at
+                             #  z=0 -> R_ROD at z=L (R_ROD is then the EXIT radius)
+    R_ENTRANCE: float = 1.0         # [WALL_TAPER] wall radius at the LED end [mm]
     # ---- source model ----
     SOURCE:  str = "led"     # "led" = centered Lambertian LED; "cone" = uniform
                              #  disk + uniform cone (legacy / idealized)
@@ -185,21 +188,22 @@ def _cap_normal(P, fprime, R):
 # --------------------------------------------------------------------------- #
 def _trace_ray(o, d, f, fprime, p, z_target, rng, path=None):
     inside = True
-    R, L = p.R_ROD, p.L
+    L = p.L
+    R0, kwall, Rexit = wall_params(p)
     if path is not None:
         path.append(o.copy())
     for _ in range(p.MAX_BOUNCES):
         if inside:
-            tc = _hit_cylinder(o, d, R, L)
-            tp = _hit_cap(o, d, f, R, L)
-            te = _hit_entrance(o, d, R)
+            tc = _hit_cone(o, d, R0, kwall, L)
+            tp = _hit_cap(o, d, f, Rexit, L)
+            te = _hit_entrance(o, d, R0)
             t = min(tc, tp, te)
             if not np.isfinite(t):
                 return None
             P = o + t*d
             if t == tc and getattr(p, "WALL_MIRROR", False):
                 # reflective side wall: specular reflect, absorb (1-R) fraction
-                n = np.array([P[0], P[1], 0.0]) / R
+                n = _cone_normal(P, kwall)
                 d = d - 2*np.dot(d, n)*n
                 o = P
                 if path is not None:
@@ -208,11 +212,11 @@ def _trace_ray(o, d, f, fprime, p, z_target, rng, path=None):
                     return None                    # absorbed by the coating
                 continue                            # stays inside the glass
             if t == tc:
-                n_out = np.array([P[0], P[1], 0.0]) / R
+                n_out = _cone_normal(P, kwall)
             elif t == te:
                 n_out = np.array([0.0, 0.0, -1.0])
             else:
-                n_out = _cap_normal(P, fprime, R)
+                n_out = _cap_normal(P, fprime, Rexit)
             d, transmitted = interact(d, n_out, p.N_PMMA, p.N_AIR, rng)
             o = P
             if path is not None:
@@ -220,7 +224,7 @@ def _trace_ray(o, d, f, fprime, p, z_target, rng, path=None):
             if transmitted:
                 inside = False
         else:
-            tp = _hit_cap(o, d, f, R, L)
+            tp = _hit_cap(o, d, f, Rexit, L)
             tt = (z_target - o[2]) / d[2] if abs(d[2]) > 1e-15 else np.inf
             if EPS < tt < tp:
                 P = o + tt*d
@@ -229,7 +233,7 @@ def _trace_ray(o, d, f, fprime, p, z_target, rng, path=None):
                 return P[0], P[1]
             if np.isfinite(tp):                        # re-entered glass
                 P = o + tp*d
-                d, transmitted = interact(d, _cap_normal(P, fprime, R),
+                d, transmitted = interact(d, _cap_normal(P, fprime, Rexit),
                                           p.N_AIR, p.N_PMMA, rng)
                 o = P
                 if path is not None:
@@ -361,6 +365,76 @@ def _hit_cyl_v(o, d, R, L):
     return t
 
 
+def wall_params(p):
+    """(R0, k, R_exit): the wall radius is r(z) = R0 + k*z.  Straight cylinder is
+    the special case k=0 (R0 = R_exit = R_ROD)."""
+    R_exit = p.R_ROD
+    R0 = p.R_ENTRANCE if getattr(p, "WALL_TAPER", False) else R_exit
+    k = (R_exit - R0) / p.L
+    return R0, k, R_exit
+
+
+def _hit_cone_v(o, d, R0, k, L):
+    """First intersection with the wall of revolution r(z)=R0+k*z, 0<=z<=L."""
+    ox, oy, oz = o[:, 0], o[:, 1], o[:, 2]
+    dx, dy, dz = d[:, 0], d[:, 1], d[:, 2]
+    rw0 = R0 + k*oz
+    A = dx*dx + dy*dy - (k*dz)**2
+    B = 2*(ox*dx + oy*dy) - 2*k*dz*rw0
+    C = ox*ox + oy*oy - rw0*rw0
+    t = np.full(len(o), np.inf)
+    quad = np.abs(A) > 1e-12
+    disc = B*B - 4*A*C
+    okq = quad & (disc >= 0)
+    sq = np.sqrt(np.where(okq, disc, 0.0))
+    for sgn in (-1.0, 1.0):
+        tt = np.where(quad, (-B + sgn*sq) / np.where(quad, 2*A, 1.0), np.inf)
+        z = oz + tt*dz
+        good = okq & (tt > EPS) & (z >= 0.0) & (z <= L) & (tt < t)
+        t = np.where(good, tt, t)
+    lin = ~quad & (np.abs(B) > 1e-15)              # A~0: linear B t + C = 0
+    tl = np.where(lin, -C / np.where(lin, B, 1.0), np.inf)
+    zl = oz + tl*dz
+    goodl = lin & (tl > EPS) & (zl >= 0.0) & (zl <= L) & (tl < t)
+    t = np.where(goodl, tl, t)
+    return t
+
+
+def _cone_normal_v(P, k):
+    rw = np.hypot(P[:, 0], P[:, 1])                # = R0 + k z on the wall
+    n = np.column_stack([P[:, 0], P[:, 1], -k*rw])
+    return n / np.linalg.norm(n, axis=1, keepdims=True)
+
+
+def _hit_cone(o, d, R0, k, L):
+    """Scalar cone-wall intersection (for the single-ray path tracer)."""
+    ox, oy, oz = o
+    dx, dy, dz = d
+    rw0 = R0 + k*oz
+    A = dx*dx + dy*dy - (k*dz)**2
+    B = 2*(ox*dx + oy*dy) - 2*k*dz*rw0
+    C = ox*ox + oy*oy - rw0*rw0
+    cands = []
+    if abs(A) > 1e-12:
+        disc = B*B - 4*A*C
+        if disc >= 0:
+            sq = np.sqrt(disc)
+            cands = [(-B - sq)/(2*A), (-B + sq)/(2*A)]
+    elif abs(B) > 1e-15:
+        cands = [-C/B]
+    best = np.inf
+    for tt in sorted(cands):
+        if tt > EPS and 0.0 <= oz + tt*dz <= L and tt < best:
+            best = tt
+    return best
+
+
+def _cone_normal(P, k):
+    rw = np.hypot(P[0], P[1])
+    n = np.array([P[0], P[1], -k*rw])
+    return n / np.linalg.norm(n)
+
+
 def _hit_entrance_v(o, d, R):
     okz = np.abs(d[:, 2]) > 1e-15
     tt = np.where(okz, -o[:, 2] / np.where(okz, d[:, 2], 1.0), np.inf)
@@ -426,18 +500,22 @@ def _hit_cap_v(o, d, f, R, L, hmax, K=160, nbis=40):
     return np.where(has & (rr <= R + 1e-6), t_hit, np.inf)
 
 
-def _simulate_vec(f, fprime, p, n_rays, seed, progress, desc):
+def _simulate_vec(f, fprime, p, n_rays, seed, progress, desc, return_fates=False):
     import time
     rng = np.random.default_rng(seed)
     o, d = make_rays(n_rays, p, rng)
     o = np.ascontiguousarray(o, float); d = np.ascontiguousarray(d, float)
     zt = p.z_target(f)
-    R, L, hmax = p.R_ROD, p.L, float(f(0.0))
+    L, hmax = p.L, float(f(0.0))
+    R0, kwall, Rexit = wall_params(p)              # wall r(z) = R0 + kwall*z
 
     inside = np.ones(n_rays, bool)
     alive = np.ones(n_rays, bool)
     landed = np.zeros(n_rays, bool)
     hit = np.full((n_rays, 2), np.nan)
+    # per-ray fate: 0=unresolved, 1=reached screen, 2=absorbed by wall coating,
+    # 3=exited into air missing the screen (e.g. backward out the entrance)
+    reason = np.zeros(n_rays, np.int8)
     t0 = time.time()
 
     for bounce in range(p.MAX_BOUNCES):
@@ -450,12 +528,13 @@ def _simulate_vec(f, fprime, p, n_rays, seed, progress, desc):
         # ---- rays currently inside the glass ----
         if len(ins):
             oi, di = o[ins], d[ins]
-            tc = _hit_cyl_v(oi, di, R, L)
-            te = _hit_entrance_v(oi, di, R)
-            tp = _hit_cap_v(oi, di, f, R, L, hmax)
+            tc = _hit_cone_v(oi, di, R0, kwall, L)
+            te = _hit_entrance_v(oi, di, R0)
+            tp = _hit_cap_v(oi, di, f, Rexit, L, hmax)
             t = np.minimum(np.minimum(tc, tp), te)
             lost = ~np.isfinite(t)
             alive[ins[lost]] = False
+            reason[ins[lost]] = 3
             gd = ~lost
             gi = ins[gd]
             if len(gi):
@@ -475,7 +554,7 @@ def _simulate_vec(f, fprime, p, n_rays, seed, progress, desc):
                     if ie.any():
                         nrm[ie] = np.array([0.0, 0.0, -1.0])
                     if ip.any():
-                        nrm[ip] = _cap_normal_v(P[refr][ip], fprime, R)
+                        nrm[ip] = _cap_normal_v(P[refr][ip], fprime, Rexit)
                     new_d, transmitted = _interact_v(d[idx], nrm, p.N_PMMA, p.N_AIR, rng)
                     d[idx] = new_d
                     inside[idx[transmitted]] = False
@@ -484,13 +563,14 @@ def _simulate_vec(f, fprime, p, n_rays, seed, progress, desc):
                 if is_c.any():
                     idx = gi[is_c]
                     Pc = P[is_c]
-                    n = np.column_stack([Pc[:, 0], Pc[:, 1], np.zeros(len(Pc))]) / R
+                    n = _cone_normal_v(Pc, kwall)
                     if getattr(p, "WALL_MIRROR", False):
                         # reflective coating: specular reflect, absorb (1-R)
                         dot = np.einsum('ij,ij->i', d[idx], n)
                         d[idx] = d[idx] - 2*dot[:, None]*n
                         absorbed = rng.random(len(idx)) >= p.WALL_REFLECTIVITY
                         alive[idx[absorbed]] = False
+                        reason[idx[absorbed]] = 2
                     else:
                         new_d, transmitted = _interact_v(d[idx], n, p.N_PMMA, p.N_AIR, rng)
                         d[idx] = new_d
@@ -499,7 +579,7 @@ def _simulate_vec(f, fprime, p, n_rays, seed, progress, desc):
         # ---- rays currently outside, in air past the cap ----
         if len(out):
             oo, do = o[out], d[out]
-            tp = _hit_cap_v(oo, do, f, R, L, hmax)
+            tp = _hit_cap_v(oo, do, f, Rexit, L, hmax)
             dz = do[:, 2]
             okz = np.abs(dz) > 1e-15
             tt = np.where(okz, (zt - oo[:, 2]) / np.where(okz, dz, 1.0), np.inf)
@@ -509,17 +589,20 @@ def _simulate_vec(f, fprime, p, n_rays, seed, progress, desc):
                 P = o[ri] + tt[reach][:, None]*d[ri]
                 hit[ri] = P[:, :2]
                 landed[ri] = True
+                reason[ri] = 1
             rest = ~reach
             reenter = rest & np.isfinite(tp)
             ei = out[reenter]
             if len(ei):
                 P = o[ei] + tp[reenter][:, None]*d[ei]
-                new_d, transmitted = _interact_v(d[ei], _cap_normal_v(P, fprime, R),
+                new_d, transmitted = _interact_v(d[ei], _cap_normal_v(P, fprime, Rexit),
                                                  p.N_AIR, p.N_PMMA, rng)
                 o[ei] = P
                 d[ei] = new_d
                 inside[ei[transmitted]] = True
-            alive[out[rest & ~np.isfinite(tp)]] = False
+            gone = out[rest & ~np.isfinite(tp)]
+            alive[gone] = False
+            reason[gone] = 3
 
         if progress:
             resolved = float((landed | ~alive).mean())
@@ -527,8 +610,17 @@ def _simulate_vec(f, fprime, p, n_rays, seed, progress, desc):
                   f"{p.MAX_BOUNCES}, active {int((alive & ~landed).sum())}, "
                   f"{time.time()-t0:4.1f}s)", flush=True)
 
+    reason[reason == 0] = 4                    # still bouncing at the jump limit
     hits = hit[landed]
-    return hits, (int(landed.sum())/n_rays if n_rays else 0.0)
+    frac = (int(landed.sum())/n_rays if n_rays else 0.0)
+    if return_fates:
+        fates = dict(emitted=int(n_rays),
+                     reached_screen=int((reason == 1).sum()),
+                     absorbed_wall=int((reason == 2).sum()),
+                     exited_air_missed=int((reason == 3).sum()),
+                     decayed_maxbounce=int((reason == 4).sum()))
+        return hits, frac, fates
+    return hits, frac
 
 
 def _simulate_scalar(f, fprime, p, n_rays, seed, progress, progress_step, desc):
@@ -555,18 +647,20 @@ def _simulate_scalar(f, fprime, p, n_rays, seed, progress, progress_step, desc):
 
 
 def simulate(f, fprime, p=Params(), n_rays=40000, seed=0,
-             progress=False, progress_step=0.05, desc="tracing", engine="vec"):
+             progress=False, progress_step=0.05, desc="tracing", engine="vec",
+             return_fates=False):
     """Trace n_rays; return (hits Nx2 on target plane, fraction_on_target).
 
     engine="vec" (default) advances all rays together with numpy — ~50-100x
     faster than engine="scalar" (the reference per-ray loop).  Both use the same
     physics (Snell + unpolarized Fresnel + TIR).  progress=True prints progress
     (per-bounce for vec, every `progress_step` fraction for scalar), flushed so
-    it shows live even when piped to a log.
-    """
+    it shows live even when piped to a log.  return_fates=True (vec only) also
+    returns a dict counting each ray's outcome (reached screen / absorbed by the
+    wall / exited into air missing the screen / decayed at the jump limit)."""
     if engine == "scalar":
         return _simulate_scalar(f, fprime, p, n_rays, seed, progress, progress_step, desc)
-    return _simulate_vec(f, fprime, p, n_rays, seed, progress, desc)
+    return _simulate_vec(f, fprime, p, n_rays, seed, progress, desc, return_fates)
 
 
 # --------------------------------------------------------------------------- #
@@ -643,16 +737,22 @@ def plot_system_rays(f, fprime, p=Params(), n_rays=45, target_r=15.0,
 
     o, d = make_meridional_rays(n_rays, p, div_half_deg=getattr(p, "DIV_HALF_DEG", 0.0))
     paths, zt = trace_paths(o, d, f, fprime, p)
-    R, L = p.R_ROD, p.L
+    L = p.L
+    R0, kwall, Rexit = wall_params(p)
 
     fig, ax = plt.subplots(figsize=(13, 6))
-    # --- geometry ---
-    ax.plot([0, 0], [-R, R], color="0.3", lw=1.5)                 # LED / entrance
-    ax.plot([0, L], [R, R], color="0.3", lw=1.5)                  # walls
-    ax.plot([0, L], [-R, -R], color="0.3", lw=1.5)
-    xr = np.linspace(-R, R, 160)
-    ax.plot(L + f(np.abs(xr)), xr, color="0.3", lw=1.5)           # shaped end face
-    ax.fill_betweenx(xr, np.zeros_like(xr), L + f(np.abs(xr)), color="C0", alpha=0.07)
+    # --- geometry (tapered wall R0 -> Rexit) ---
+    ax.plot([0, 0], [-R0, R0], color="0.3", lw=1.5)              # LED / entrance
+    ax.plot([0, L], [R0, Rexit], color="0.3", lw=1.5)            # tapered walls
+    ax.plot([0, L], [-R0, -Rexit], color="0.3", lw=1.5)
+    xr = np.linspace(-Rexit, Rexit, 160)
+    ax.plot(L + f(np.abs(xr)), xr, color="0.3", lw=1.5)          # shaped end face
+    # fill the rod interior (tapered wall + end face) lightly
+    zw = np.linspace(0, L, 60)
+    yface = np.linspace(Rexit, -Rexit, 90)
+    poly_z = np.concatenate([zw, L + f(np.abs(yface)), zw[::-1]])
+    poly_y = np.concatenate([R0 + kwall*zw, yface, -(R0 + kwall*zw[::-1])])
+    ax.fill(poly_z, poly_y, color="C0", alpha=0.06, lw=0)
     ax.plot([zt, zt], [-screen_r, screen_r], color="0.45", lw=2)  # screen
     ax.plot([zt, zt], [-target_r, target_r], color="limegreen", lw=5, alpha=0.85)
     ax.annotate("LED", (0, 0), (-6, 0), ha="right", va="center", fontsize=9, color="0.3")

@@ -1,0 +1,38 @@
+SINGLE-FACE RUN RECORD
+============================================================
+timestamp: 20260713_183951
+
+CONFIGURATION
+------------------------------------------------------------
+  rod material / index   : PMMA, n = 1.49
+  rod radius             : 3.0 mm (diameter 6.0 mm)
+  rod length L           : 50.0 mm
+  target distance (apex) : 80.0 mm
+  end face               : convex sphere Rs = 3.0 mm  (= rod radius -> hemisphere; apex bulge 3.000 mm)
+  source                 : OSLON Pure 1414, Lambertian, direct-coupled (no air gap), emitter dia 1.4 mm centered
+  internal angle range   : up to 90 deg inside PMMA
+  side wall              : MIRROR 99% reflective (1% absorbed/hit), no side transmission
+  ray lifetime           : vanishes after 30 jumps
+  success metric         : uniformity over 15.0 mm-radius disc
+  screen shown to        : 30.0 mm radius
+
+IMPLEMENTATION
+------------------------------------------------------------
+  rays (statistics)      : 80000
+  rays drawn in graph    : 90 meridional
+  RNG seed               : 1
+  tracer engine          : vectorized (Snell + Fresnel + TIR + mirror wall)
+
+RESULTS — ray fates (% of 80000 emitted; sum = 100%)
+------------------------------------------------------------
+  hit target (<= 15 mm)        :   3.98 %   (3184)
+  exit, miss target (> 15 mm)  :  60.74 %   (48590)
+  decay inside rod             :  17.08 %   (13666)
+      - absorbed by wall coat  :  10.61 %   (8490)
+      - decayed at jump limit  :   6.47 %   (5176)
+  exit backward, miss screen   :  18.20 %   (14560)
+
+  reaches screen (hit+miss)    : 64.72 % of emitted
+  uniformity (std/mean, 0-15mm): 0.2105
+  RMS radius                   : 579.36 mm
+  r95 (95% within)             : 304.42 mm

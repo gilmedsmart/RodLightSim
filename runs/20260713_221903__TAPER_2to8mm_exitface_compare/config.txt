@@ -1,0 +1,20 @@
+TAPERED COLLIMATOR — EXIT-FACE COMPARISON
+============================================================
+timestamp: 20260713_221903
+
+CONFIG
+------------------------------------------------------------
+  rod: PMMA n=1.49, L=50.0 mm, TAPERED wall
+  entrance dia 2.0 mm -> exit dia 8.0 mm (max 8)
+  wall: 99% mirror, N=30 jumps
+  source: OSLON 1414 Lambertian, direct-coupled, emitter dia 1.4 mm
+  target screen 80.0 mm past apex; success disc 15.0 mm radius
+  rays 80000, seed 1
+
+RESULTS (uniformity over 0-15mm; % of emitted)
+------------------------------------------------------------
+  exit face        apex  reach%   in15%   in30%    uni   medR
+  flat              0.0    91.8    27.5    80.5  0.181   21.2
+  convex_Rs8      1.072    92.0    26.7    77.3  0.175   21.5
+  convex_Rs6      1.528    86.5    32.5    73.0  0.094   20.3
+  convex_Rs5        2.0    80.3    30.0    70.6  0.109   21.3
