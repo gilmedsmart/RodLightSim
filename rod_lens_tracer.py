@@ -791,8 +791,9 @@ def plot_system_rays(f, fprime, p=Params(), n_rays=45, target_r=15.0,
 
     fig.tight_layout()
     fig.savefig(fname, dpi=130)
+    plt.close(fig)
     print(f"saved {fname}  ({ntot} rays: {n_hit} hit / {n_miss} miss / {n_lost} lost)")
-    return fig
+    return fname
 
 
 def plot_ray_paths(f, fprime, p=Params(), n_rays=25, div_half_deg=0.0,
